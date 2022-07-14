@@ -8,6 +8,9 @@ testCoverage/*.cs
 DuplicateRemoves/bin
 DuplicateRemover/obj
 DuplicateRemover/bin/
+TestedMethodLister/bin
+TestedMethodLister/obj
+TestedMethodLister/.vscode
 testCoverage/bin/
 testCoverage/coverage.json
 testCoverage/obj/

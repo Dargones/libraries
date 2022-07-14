@@ -22,6 +22,8 @@ test: compile
 coverage : compile
 	dotnet build DuplicateRemover/DuplicateRemover.sln
 	dotnet DuplicateRemover/bin/Debug/net6.0/DuplicateRemover.dll tests/AllTests.cs src/AllSource.cs > testCoverage/OnlyTests.cs
+	dotnet build TestedMethodLister.cs/TestedMethodLister.sln
+	dotnet TestedMethodLister/bin/Debug/net6.0/TestedMethodLister.dll tests/AllTests.cs > TestedMethodLister/TestedMethods.txt
 	dotnet build testCoverage/TestCoverage.csproj
 	dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=json testCoverage/TestCoverage.csproj
 	python3 coverage.py testCoverage/coverage.json BoundedInts DivInternals Imaps Maps Math ModInternals MulInternals Power2 Power Seq Sets Uint8__16 Uint8__16_mUint8Seq Uint8__16_mUint16Seq Uint8__32 Uint8__32_mUint8Seq Uint8__32_mUint32Seq Uint8__64 Uint8__64_mUint8Seq Uint8__64_mUint64Seq Uint16__32 Uint16__32_mUint16Seq Uint16__32_mUint32Seq Uint32__64 Uint32__64_mUint32Seq Uint32__64_mUint64Seq Wrappers 

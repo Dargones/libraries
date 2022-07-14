@@ -1,6 +1,22 @@
 import json
 import sys
 from collections import defaultdict
+import re
+
+from numpy import True_
+
+def get_just_method_name(name):
+    space = name.find(' ')
+    paren = name.find('(')
+    return name[space+1:paren]
+
+def is_tested_method(name, method_set):
+    for method in method_set:
+        check_list = method.split('::', 1)
+        if check_list[0] in name and check_list[1] in name:
+            return True
+    print("returning false on " + name)
+    return False
 
 """
 Generate a detailed coverage report based on the .json file produced by coverlet
@@ -11,6 +27,12 @@ If no modules are specified, the report is generated for all modules
 if __name__ == "__main__":
     data = " ".join([line.strip("\n") for line in open(sys.argv[1]).readlines()])
     parsed_data = json.loads(data)
+
+    tested_methods = {}
+    tested_methods_file = open('TestedMethodLister/TestedMethods.txt', 'r')
+    lines = tested_methods_file.readlines()
+        
+    tested_methods = {re.sub(r"[\n\t\s]*", "", line) for line in lines}
 
     modules = []
     if len(sys.argv) > 2:
@@ -43,16 +65,18 @@ if __name__ == "__main__":
                               "methods-covered": 0}
 
                 for methodName in parsed_data[dll][cs][clazz].keys():
-                    method = parsed_data[dll][cs][clazz][methodName]
-                    curr_stats["methods"] += 1
-                    curr_stats["branches"] += len(method["Branches"])
-                    curr_stats["branches-covered"] += sum(b["Hits"] != 0
-                                    for b in method["Branches"])
-                    curr_stats["lines"] += len(method["Lines"])
-                    lines_add = sum(method["Lines"][line] != 0
-                                    for line in method["Lines"].keys())
-                    curr_stats["lines-covered"] += lines_add
-                    curr_stats["methods-covered"] += lines_add != 0
+                    just_method_name = get_just_method_name(methodName)
+                    if is_tested_method(just_method_name, tested_methods):
+                        method = parsed_data[dll][cs][clazz][methodName]
+                        curr_stats["methods"] += 1
+                        curr_stats["branches"] += len(method["Branches"])
+                        curr_stats["branches-covered"] += sum(b["Hits"] != 0
+                                        for b in method["Branches"])
+                        curr_stats["lines"] += len(method["Lines"])
+                        lines_add = sum(method["Lines"][line] != 0
+                                        for line in method["Lines"].keys())
+                        curr_stats["lines-covered"] += lines_add
+                        curr_stats["methods-covered"] += lines_add != 0
 
                 for key in curr_stats:
                     stats["overall"][key] += curr_stats[key]
