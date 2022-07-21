@@ -22,7 +22,7 @@ test: compile
 coverage : compile
 	dotnet build DuplicateRemover/DuplicateRemover.sln
 	dotnet DuplicateRemover/bin/Debug/net6.0/DuplicateRemover.dll tests/AllTests.cs src/AllSource.cs > testCoverage/OnlyTests.cs
-	dotnet build TestedMethodLister.cs/TestedMethodLister.sln
+	dotnet build TestedMethodLister/TestedMethodLister.sln
 	dotnet TestedMethodLister/bin/Debug/net6.0/TestedMethodLister.dll tests/AllTests.cs > TestedMethodLister/TestedMethods.txt
 	dotnet build testCoverage/TestCoverage.csproj
 	dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=json testCoverage/TestCoverage.csproj

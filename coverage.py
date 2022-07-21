@@ -15,7 +15,7 @@ def is_tested_method(name, method_set):
         check_list = method.split('::', 1)
         if check_list[0] in name and check_list[1] in name:
             return True
-    print("returning false on " + name)
+    print(name + " is not a method we're testing")
     return False
 
 """

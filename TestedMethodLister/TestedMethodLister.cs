@@ -1,21 +1,60 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using System.Text.Json.Serialization;
 
 namespace TestedMethodLister;
 
-public static class TestedMethodLister {
-
-
+public class TestedMethodLister {
 
     public static void Main(string[] args) {
+
+
         var allTests = CSharpSyntaxTree.ParseText(File.ReadAllText(args[0]));
         CompilationUnitSyntax root = allTests.GetCompilationUnitRoot();
-        root = root.NormalizeWhitespace();
-        // var invocations = root.DescendantNodes()
-        //                                         .OfType<InvocationExpressionSyntax>();
-        TestedMethodWalker walker = new TestedMethodWalker();
+
+        var compilation = CSharpCompilation.Create("AllTests")
+            .AddReferences(MetadataReference.CreateFromFile(
+        typeof(object).Assembly.Location))
+            .AddSyntaxTrees(allTests);
+
+        SemanticModel model = compilation.GetSemanticModel(allTests);
+        var myTypeSyntax = root.DescendantNodes().OfType<TypeDeclarationSyntax>().First();
+        var myTypeInfo = model.GetDeclaredSymbol(myTypeSyntax);
+
+        var nodes = root.DescendantNodes(n => true);
+        HashSet<INamedTypeSymbol> typeSet = new();
+        if (nodes != null)
+        {
+            var syntaxNodes = nodes as SyntaxNode[] ?? nodes.ToArray();
+
+            // IdentifierNameSyntax:
+            //  - var keyword
+            //  - identifiers of any kind (including type names)
+            var namedTypes = syntaxNodes
+                .OfType<IdentifierNameSyntax>()
+                .Select(id => model.GetSymbolInfo(id).Symbol)
+                .OfType<INamedTypeSymbol>()
+                .Select(type => type.OriginalDefinition)
+                .ToHashSet();
+
+            typeSet.UnionWith(namedTypes);
+
+            // ExpressionSyntax:
+            //  - method calls
+            //  - property uses
+            //  - field uses
+            //  - all kinds of composite expressions
+            var expressionTypes = syntaxNodes
+                .OfType<ExpressionSyntax>()
+                .Select(ma => model.GetTypeInfo(ma).Type)
+                .OfType<INamedTypeSymbol>()
+                .Select(type => type.OriginalDefinition)
+                .ToHashSet();
+
+            typeSet.UnionWith(expressionTypes);
+        }
+
+        TestedMethodWalker walker = new TestedMethodWalker(model, typeSet, compilation);
         walker.Visit(root);
 
         foreach (var method in walker.TestedMethodNames)
@@ -25,85 +64,122 @@ public static class TestedMethodLister {
 
 class TestedMethodWalker : CSharpSyntaxWalker {
 
-    public Dictionary<string, HashSet<string>> RootDeclToFullyQualifiedClassNameSet { get; }
-    public Dictionary<string, HashSet<string>> FullyQualifiedClassNameToMethodNameSet { get; }
     public HashSet<string> TestedMethodNames { get; }
-    private ClassDeclarationSyntax? currentClass;
+    private SemanticModel model;
+    private HashSet<INamedTypeSymbol> typeSet;
+    private Compilation comp;
 
-    public TestedMethodWalker() {
+    public TestedMethodWalker(SemanticModel model, HashSet<INamedTypeSymbol> typeSet, Compilation comp) {
         TestedMethodNames = new();
-        FullyQualifiedClassNameToMethodNameSet = new();
-        RootDeclToFullyQualifiedClassNameSet = new();
+        this.model = model;
+        this.typeSet = typeSet;
+        this.comp = comp;
     }
 
-    public string GetNonUnitTestEquivalent(string cls) {
-        const string phrase = "UnitTests";
-        var index = cls.IndexOf("UnitTests");
-        if (index == -1) {
-            return cls;
-        }
-        return cls.Substring(0, index) + cls.Substring(index + phrase.Count());
-    }
-
-    public (string, string) GetFullyQualifiedClassNameAndRootDecl() {
-        if (currentClass == null) 
-            return ("", "");
-        var str = currentClass.Identifier.Text;
-        var rootDecl = "";
-        foreach (var node in currentClass.Ancestors()) {
+    public bool CheckIfInUnitTestsDecl(SyntaxNode startNode) {
+        
+        foreach (var node in startNode.Ancestors()) {
             if (node is NamespaceDeclarationSyntax ns) {
                 if (ns.Name is IdentifierNameSyntax ident) {
-                    rootDecl = ident.GetText().ToString().TrimEnd( '\r', '\n' );
-                    str = rootDecl + "." + str;
+                    if (ident.GetText().ToString().Contains("UnitTests")) 
+                        return true;
                 }
             } else if (node is ClassDeclarationSyntax cls) {
-                str = cls.GetText().ToString().TrimEnd( '\r', '\n' ) + "." + str;
+                if (cls.GetText().ToString().Contains("UnitTests"))
+                    return true;
             }
         }        
-        return (str, rootDecl);
+        return false;
     }
 
-    public override void VisitMethodDeclaration(MethodDeclarationSyntax node)
-    {
-        var (fullQualified, _) = GetFullyQualifiedClassNameAndRootDecl();
-        if (!FullyQualifiedClassNameToMethodNameSet.ContainsKey(fullQualified)) {
-            FullyQualifiedClassNameToMethodNameSet[fullQualified] = new HashSet<string>();
+    public SimpleNameSyntax? PullSimpleNameFromParenExpr(ParenthesizedExpressionSyntax startNode) {
+        ExpressionSyntax node = startNode;
+        while (node is ParenthesizedExpressionSyntax p) {
+            if (p.Expression is SimpleNameSyntax s) {
+                return s;
+            }
+
+            node = p.Expression;
         }
-        FullyQualifiedClassNameToMethodNameSet[fullQualified].Add(node.Identifier.ToString());
-        base.VisitMethodDeclaration(node);
+        return null;
     }
 
-    public override void VisitClassDeclaration(ClassDeclarationSyntax node)
-    {
-        currentClass = node;
-        var (fullQualified, rootDecl) = GetFullyQualifiedClassNameAndRootDecl();
-        if (!RootDeclToFullyQualifiedClassNameSet.ContainsKey(rootDecl)) {
-            RootDeclToFullyQualifiedClassNameSet[rootDecl] = new HashSet<string>();
+    public HashSet<INamedTypeSymbol> GetDerivedTypes(ITypeSymbol baseType) {
+        HashSet<INamedTypeSymbol> derivedTypes = new();
+        foreach (var type in typeSet) {
+            foreach (var intf in type.Interfaces) {
+                if (intf.ToString().Equals(baseType.ToString())) {
+                    derivedTypes.Add(type);
+                }
+            }
         }
-        RootDeclToFullyQualifiedClassNameSet[rootDecl].Add(fullQualified);
-        base.VisitClassDeclaration(node);
+        return derivedTypes;
+    }
+
+    public string RemoveTypeArguments(string type) {
+        var openAngleIndex = type.IndexOf('<');
+        var closeAngleIndex = type.LastIndexOf('>');
+        if (openAngleIndex == -1 || closeAngleIndex == -1 )
+            return type;
+        return type.Remove(openAngleIndex, closeAngleIndex - openAngleIndex + 1);
+    }
+
+    public bool IsInOracleExpression(SyntaxNode node) {
+        foreach(var a in node.Ancestors()) {
+            if (a is IfStatementSyntax)
+                return true;
+        }
+        return false;
+    }
+
+    public bool IsReturnVarAssignment(SyntaxNode node) {
+        foreach (var a in node.Ancestors()) {
+            if (a is AssignmentExpressionSyntax ae) {
+                if (ae.Left.ToString().Contains("r") ||
+                    (ae.Left.ToString().Contains("out")))
+                    return true;
+                else return false;
+            }
+            else if (a is ExpressionStatementSyntax) {
+                return true;
+            } 
+        }
+        return true;
     }
 
     public override void VisitInvocationExpression(InvocationExpressionSyntax node)
     {
-        var (_, rootDecl) = GetFullyQualifiedClassNameAndRootDecl();
-        if (!rootDecl.Contains("UnitTests")) {
-            return;
+        if (node.ToString().Contains("_713_d0")) {
+            var a = "hi";
         }
+        var callExpr = node.Expression;
 
-        var expr = node.Expression;
-        if (expr is MemberAccessExpressionSyntax id) {
-            var rootDeclNonTest = GetNonUnitTestEquivalent(rootDecl);
-            var methodBeingCalled = id.Name.Identifier.ToString();
-
-            var fullQualifiedClassSet = RootDeclToFullyQualifiedClassNameSet[rootDeclNonTest];
-            foreach (var fullQualified in fullQualifiedClassSet) {
-                if (FullyQualifiedClassNameToMethodNameSet[fullQualified].Contains(methodBeingCalled)) {
-                    var totalStr = fullQualified + "::" + methodBeingCalled;
-                    TestedMethodNames.Add(totalStr);
+        // check to make sure in unit test namespace
+        if (CheckIfInUnitTestsDecl(node) && IsReturnVarAssignment(node) && 
+            !IsInOracleExpression(node) && callExpr is MemberAccessExpressionSyntax ma) {
+            var Lhs = ma.Expression;
+            if (Lhs is MemberAccessExpressionSyntax l) {
+                var modifiedType = RemoveTypeArguments(l.ToString());
+                var modifiedCall = RemoveTypeArguments(ma.Name.ToString());
+                TestedMethodNames.Add(modifiedType + "::" + modifiedCall);
+            } else if (Lhs is ParenthesizedExpressionSyntax p) {
+                var simpleName = PullSimpleNameFromParenExpr(p);
+                if (simpleName != null) {
+                    var type = model.GetTypeInfo(simpleName).Type;
+                    if (type is INamedTypeSymbol && type.IsAbstract) {
+                        var set = GetDerivedTypes(type.OriginalDefinition);
+                        foreach (var derivedType in set) {
+                            var result = comp.ClassifyConversion(type, derivedType);
+                            if (!result.IsThrow && result.IsExplicit) {
+                                var modifiedType = RemoveTypeArguments(derivedType.ToString());
+                                var modifiedCall = RemoveTypeArguments(ma.Name.ToString());
+                                TestedMethodNames.Add(modifiedType + "::" + modifiedCall);
+                            }
+                        }                        
+                    }
                 }
             }
         }
-        base.VisitInvocationExpression(node);
+        //base.VisitInvocationExpression(node);
     }
 }
