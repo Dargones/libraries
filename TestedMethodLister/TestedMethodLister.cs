@@ -149,9 +149,6 @@ class TestedMethodWalker : CSharpSyntaxWalker {
 
     public override void VisitInvocationExpression(InvocationExpressionSyntax node)
     {
-        if (node.ToString().Contains("_713_d0")) {
-            var a = "hi";
-        }
         var callExpr = node.Expression;
 
         // check to make sure in unit test namespace
