@@ -28,7 +28,8 @@ coverage : compile
 	python3 FilterCoverage.py stats/ testCoverage/TestResults/coverage.cobertura.xml
 	dotnet new tool-manifest --force
 	dotnet tool install dotnet-reportgenerator-globaltool
-	dotnet reportgenerator "-reports:testCoverage/TestResults/coverage.cobertura.xml" "-targetdir:testCoverage/TestResults" "-reporttypes:TextSummary;HtmlSummary"
+	dotnet reportgenerator "-reports:testCoverage/TestResults/coverage.cobertura.xml" "-targetdir:testCoverage/TestResults" "-reporttypes:TextSummary;HtmlSummary;JsonSummary"
+	python3 FormatTable.py stats testCoverage/TestResults/Summary.json
 
 
 clean :
